@@ -1,8 +1,7 @@
 from rest_framework import viewsets, permissions, status
-from .models import Donation,PaymentHistory
+from .models import Donation,PaymentHistory,CustomUser
 from .serializers import DonationSerializer,UserSerializer,PaymentHistorySerializer
 from django.shortcuts import render
-from .models import CustomUser
 from .forms import RegistrationForm, LoginForm
 from django.contrib.auth import login, authenticate, logout
 from django.shortcuts import render, redirect
@@ -10,6 +9,8 @@ from django.contrib.auth.decorators import login_required
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
+from rest_framework.permissions import IsAuthenticated
+from django.views import View
 
 
 class DonationViewSet(viewsets.ModelViewSet):
@@ -17,8 +18,13 @@ class DonationViewSet(viewsets.ModelViewSet):
     serializer_class = DonationSerializer
     
 class PaymentHistoryViewSet(viewsets.ModelViewSet):
-    queryset = PaymentHistory.objects.all()
     serializer_class = PaymentHistorySerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        # Filter payment history records for the authenticated user
+        user = self.request.user
+        return PaymentHistory.objects.filter(user=user)
 
 class CustomUserViewSet(viewsets.ModelViewSet):
     queryset = CustomUser.objects.all()
@@ -42,40 +48,45 @@ class CustomUserViewSet(viewsets.ModelViewSet):
     def logout(self, request):
         logout(request)
         return Response({'message': 'Logged out successfully'})
+    
+class DashboardView(View):
+    def get(self, request):
+        # Get the payment history for the logged-in user
+        payments = PaymentHistory.objects.filter(user=request.user)
+        context = {
+            'user': request.user,
+            'payments': payments,
+        }
+        return render(request, 'dashboard.html', context)
 
 # UI templates views 
 
 @login_required
-def donation_form(request):
+def donation_form(request): 
+    user = request.user
+    
     if request.method == 'POST':
         # Create a new donation entry
         transaction_id = request.POST.get('transaction_id')
-        donor_name = request.POST.get('donor_name')
-        phone_number = request.POST.get('phone_number')
         amount = request.POST.get('amount')
 
-        # if response.status_code == 201:  # Check if donation creation was successful
-        #     donation = Donation.objects.get(pk=response.data['id'])
-            # Create a corresponding payment history entry
-            
         donation = Donation.objects.create(
-            donor_name=donor_name,
-            phone_number=phone_number,
+            donor_name=user.username,
+            phone_number=user.phone,
             amount=amount,
             # You can add other fields as needed
         )
         PaymentHistory.objects.create(
-            # user=request.user,
             donation=donation,  # Assuming the donation ID is returned in the response
             transaction_id=transaction_id,  # Replace with actual transaction ID
             status="Successful",  # You can update this based on the payment status
-            user=request.user,
+            user=user,
         )
 
         return redirect('thankyou')
 
     # For GET requests, render the donate.html template
-    return render(request, 'donate.html')
+    return render(request, 'donate.html', {'user': user})
 
 def register(request):
     if request.method == 'POST':
